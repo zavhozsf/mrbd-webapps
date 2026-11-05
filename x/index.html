@@ -72,7 +72,7 @@ function parsePosts(md){
     let own=body,quote=null;const qm=body.match(/(?:!\[[^\]]*\])?\[[^\]]*\]\((?:https?:)?\/\/(?:x|twitter)\.com\/([A-Za-z0-9_]+)\/status\/(\d+)\)/);
     if(qm&&qm[2]!==id){const qi=body.indexOf(qm[0]);own=body.slice(0,qi);const qrest=body.slice(qi);const qd=qrest.match(new RegExp('\\[([^\\]]+)\\]\\((?:https?:)?\\/\\/(?:x|twitter)\\.com\\/'+qm[1]+'\\/status\\/'+qm[2]+'\\)'));const qtx=qd?stripMd(qrest.slice(qrest.indexOf(qd[0])+qd[0].length)):stripMd(qrest);quote={handle:qm[1],date:qd?qd[1]:'',text:qtx.replace(/\s+/g,' ').trim()};}
     const ct=cleanText(own); let nm='';const nre=new RegExp('(!?)\\[([^\\]!]{1,32})\\]\\((?:https?:)?\\/\\/(?:x|twitter)\\.com\\/'+u+'\\)','gi');let nmx;while((nmx=nre.exec(line))){if(!nmx[1]&&!nmx[2].startsWith('@')){nm=nmx[2];break;}}
-    if(ct.text||quote) out.push({id,user:u,name:nm||u,date,pinned,stats,quote,text:ct.text,alts:ct.alts});
+    if(ct.text||quote||(ct.alts&&ct.alts.length)) out.push({id,user:u,name:nm||u,date,pinned,stats,quote,text:ct.text||('🖼 '+(ct.alts[0]||'media')),alts:ct.alts});
   }
   return out;
 }
@@ -92,7 +92,7 @@ async function openThread(id,u){const my=++req;turl='https://x.com/'+u+'/status/
 }
 
 /* ===== feed ===== */
-function renderCard(){const p=posts[pIdx];if(!p){$('body').innerHTML='<div style="color:#555">пусто</div>';return;}
+function renderCard(){const p=posts[pIdx];$('ctx').textContent='@'+user;if(!p){$('body').innerHTML='<div style="color:#555">пусто</div>';return;}
   const st=p.stats||{};const stat=[st.replies&&('💬 '+st.replies),st.rts&&('🔁 '+st.rts),st.favs&&('♥ '+st.favs),st.views&&('👁 '+st.views)].filter(Boolean).join('   ');
   const q=p.quote?`<div class=quote><b>@${esc(p.quote.handle)}</b> ${esc(p.quote.date)}<div class=qtx>${esc(p.quote.text)}</div></div>`:'';
   $('body').innerHTML=`<div class=card><div class=chead><span class=nm>${esc(p.name||p.user)}</span><span>@${esc(p.user)}</span><span>·</span><span>${esc(p.date)}</span>${p.pinned?'<span class=pin>📌 закреп</span>':''}</div><div class=ctext>${esc(p.text)}</div>${q}${stat?`<div class=cstat>${stat}</div>`:''}</div>`;
