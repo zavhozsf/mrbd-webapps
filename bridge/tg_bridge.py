@@ -227,6 +227,9 @@ async def login_qr():
     print("QR-ЛОГИН: открой bridge/qr.html или сканируй bridge/qr.png", flush=True)
     while True:
         draw_qr(qrl.url)
+        with open(os.path.join(HERE, "qr_url.txt"), "w") as f:
+            f.write(qrl.url)
+        print("URL:", qrl.url, flush=True)
         try:
             user = await qrl.wait()  # ждёт до истечения токена
             print("AUTH OK:", user.username or user.phone or user.id, flush=True)

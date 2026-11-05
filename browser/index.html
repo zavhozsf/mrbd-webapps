@@ -18,6 +18,10 @@ html,body{width:600px;height:600px;overflow:hidden;background:#000;color:#fff;fo
 #body .rowm{padding:8px 0;border-left:6px solid transparent;padding-left:16px;margin-left:-26px}
 #body .rowm.sel{border-left-color:#0f0;background:#0a140a;color:#0f0}
 #foot{padding:12px 20px;font-size:19px;color:#bbb;border-top:2px solid #222;min-height:50px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lnk{color:#8cf;text-decoration:underline;border:2px solid transparent;padding:0 2px}
+.lnk.lnksel{color:#0f0;border-color:#0f0;background:#0a1e0a}
+.lnk.spk{color:#ff0;border:2px solid transparent}
+.lnk.spk.lnksel{color:#000;background:#ff0;border-color:#ff0}
 #ov{position:absolute;inset:0;background:#000;display:none;flex-direction:column;z-index:5}
 #kblab{padding:10px 20px;font-size:20px;color:#0f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #ovi{width:calc(100% - 40px);margin:0 20px;min-height:80px;background:#000;border:2px solid #0f0;color:#fff;font-size:26px;padding:6px 14px;font-family:inherit}
@@ -41,10 +45,10 @@ html,body{width:600px;height:600px;overflow:hidden;background:#000;color:#fff;fo
 const $=id=>document.getElementById(id);
 const DEF=[['Hacker News','https://news.ycombinator.com'],['Википедия','https://ru.m.wikipedia.org'],['Reddit','https://old.reddit.com'],['РБК','https://www.rbc.ru']];
 let bms=JSON.parse(localStorage.getItem('brBm')||'null')||DEF;
-let screen='menu',sel=0,pages=[],page=0,url='',pagesText='';
+let screen='menu',sel=0,pages=[],page=0,url='',pagesText='',lsel=0,hist=[];
 function foot(t){$('foot').textContent=t;}
-function say(t){ if(!('speechSynthesis' in window))return; const u=new SpeechSynthesisUtterance(t.slice(0,900)); speechSynthesis.cancel(); speechSynthesis.speak(u); }
 function esc(s){return s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+const TTS=()=>false; // озвучка пока вырублена
 
 /* ===== ввод: нативный композер + D-pad запасная сетка ===== */
 const LAT=['qwertyuiop','asdfghjkl','zxcvbnm'];
@@ -100,37 +104,72 @@ function renderMenu(){
   $('body').innerHTML=rows.map((r,i)=>`<div class="rowm ${i===sel?'sel':''}">${esc(r[0])}${r[1]?`<span style="color:#555;font-size:17px"> · ${esc(r[1].replace(/^https?:\/\//,'').slice(0,40))}</span>`:''}</div>`).join('');
 }
 function renderPage(){
+  const P=pages[page];
   $('ctx').textContent=url.replace(/^https?:\/\//,'').slice(0,40);
-  $('body').innerHTML=esc(pages[page]||'(пусто)');
-  foot(`стр ${page+1}/${pages.length} · ↑↓ страницы · Enter озвучить · Esc меню`);
+  let li=0;
+  $('body').innerHTML=(P?P.toks.map(tk=>{
+    if(tk.t==='a'){const s=`<span class="lnk${li===lsel?' lnksel':''}">${esc(tk.s)}</span>`;li++;return s+' ';}
+    return esc(tk.s)+'\n';
+  }).join(''):'(пусто)');
+  const s=document.querySelector('.lnksel'); if(s) s.scrollIntoView({block:'center'});
+  foot(P&&P.links.length?`стр ${page+1}/${pages.length} · ссылок ${P.links.length} · ↑↓ выбор · Enter открыть · ←→ стр · Esc назад`
+      :`стр ${page+1}/${pages.length} · ссылок нет · ↑↓ страницы · Esc назад`);
 }
 function paint(){ screen==='menu'?renderMenu():renderPage(); }
 
-function md2text(md){
+function clean(s){ return s.replace(/[**_`>#|]/g,'').replace(/\n{3,}/g,'\n\n'); }
+function mdToTokens(md){
   md=md.replace(/^Title:.*?\nURL Source:.*?\n(?:Published Time:.*?\n)?Markdown Content:\n/s,'');
-  return md.replace(/!\[[^\]]*\]\([^)]*\)/g,'')
-    .replace(/\[([^\]]*)\]\(([^)]*)\)/g,'$1')
-    .replace(/^#{1,6}\s+/gm,'— ')
-    .replace(/[*_`>#|]/g,'').replace(/\n{3,}/g,'\n\n').trim();
-}
-function paginate(t){
-  const out=[];let cur='';
-  for(const ln of t.split('\n')){
-    if((cur+'\n'+ln).length>950){out.push(cur);cur=ln;}else cur=(cur?cur+'\n':'')+ln;
-    if(cur.length>950){out.push(cur);cur='';}
+  md=md.replace(/!\[[^\]]*\]\([^)]*\)/g,'').replace(/^\s{0,4}\[[^\]]+\]:\s*\S.*$/gm,'').replace(/\[([^\]]*)\]\[[^\]]*\]/g,'$1');
+  const toks=[]; const re=/\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;[^&]*&quot;|\s+"[^"]*")?\)/g;
+  let m,last=0;
+  while((m=re.exec(md))){
+    if(m.index>last) toks.push({t:'x',s:clean(md.slice(last,m.index))});
+    let href=''; try{ href=new URL(m[2],url).href; }catch(e){}
+    const txt=clean(m[1]||m[2]||'(ссылка)')||'(ссылка)';
+    if(/^https?:/i.test(href)&&txt.length<300) toks.push({t:'a',s:txt,h:href});
+    else toks.push({t:'x',s:txt});
+    last=re.lastIndex;
   }
-  if(cur)out.push(cur);
-  return out.length?out:['(пусто)'];
+  if(last<md.length) toks.push({t:'x',s:clean(md.slice(last))});
+  return toks.length?toks:[{t:'x',s:'(пусто)'}];
 }
-async function go(u){
-  if(!/^https?:\/\//.test(u)){ if(!/^https?:\/\//.test('https://'+u)) u='https://'+u; u='https://'+u.replace(/^https?:\/\//,''); }
-  url=u; localStorage.setItem('brLast',u); screen='reader'; page=0; foot('читаю…'); paint2();
+function paginateToks(toks){
+  const out=[];let cur=[],len=0;
+  const flush=()=>{ if(cur.length){out.push(cur);cur=[];len=0;} };
+  for(const tk of toks){
+    if(tk.t==='a'){ if(len+tk.s.length>980&&cur.length)flush(); cur.push(tk); len+=tk.s.length+1; continue; }
+    for(const ln of tk.s.split('\n')){
+      if(len+ln.length+1>980&&cur.length)flush();
+      if(ln.length>980){ for(let i=0;i<ln.length;i+=980)cur.push({t:'x',s:ln.slice(i,i+980)}),flush(); len=0; continue; }
+      cur.push({t:'x',s:ln}); len+=ln.length+1;
+    }
+  }
+  flush();
+  return out.map(ts=>({toks:ts,links:ts.filter(t=>t.t==='a')}));
+}
+async function load(u,pushHist){
+  if(pushHist&&screen==='reader'&&url) hist.push(url);
+  url=u; localStorage.setItem('brLast',u); screen='reader'; page=0; lsel=0; foot('читаю…'); paint2();
   try{
     const r=await fetch('https://r.jina.ai/'+u);
     if(!r.ok) throw new Error('HTTP '+r.status+' (лимит jina — повтори через минуту)');
-    pagesText=md2text(await r.text());
-    pages=paginate(pagesText);
-    page=0; paint();
+    pages=paginateToks(mdToTokens(await r.text()));
+    page=0; lsel=pages[0]&&pages[0].links.length?0:-1; paint();
+  }catch(e){ foot('ошибка: '+e.message); screen='menu'; sel=0; paint(); }
+}
+async function go(u){
+  if(!/^https?:\/\//.test(u)) u='https://'+u.replace(/^https?:\/\//,'');
+  await load(u,true);
+}
+function goBack(){ if(hist.length){ const u=hist.pop(); url=u; load2(u); } else { screen='menu'; sel=0; paint(); } }
+async function load2(u){
+  screen='reader'; page=0; lsel=0; foot('назад…'); paint2();
+  try{
+    const r=await fetch('https://r.jina.ai/'+u);
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    pages=paginateToks(mdToTokens(await r.text()));
+    lsel=pages[0]&&pages[0].links.length?0:-1; paint();
   }catch(e){ foot('ошибка: '+e.message); screen='menu'; sel=0; paint(); }
 }
 function paint2(){ $('body').innerHTML='<div style="color:#0f0;padding-top:40px">гружу '+esc(url)+'…</div>'; $('ctx').textContent='читаю'; }
@@ -144,12 +183,18 @@ document.addEventListener('keydown',e=>{
     if(k==='ArrowDown')sel=(sel+1)%n;
     if(k==='Enter'){ if(sel===0){ ask('Адрес сайта',v=>{ if(v)go(v); else paint(); }); } else if(sel===n-1){ localStorage.getItem('brLast')?go(localStorage.getItem('brLast')):foot('сначала открой что-нибудь'); } else go(bms[sel-1][1]); }
   } else {
-    if(k==='ArrowUp')page=Math.max(0,page-1);
-    if(k==='ArrowDown')page=Math.min(pages.length-1,page+1);
-    if(k==='ArrowLeft')page=Math.max(0,page-5);
-    if(k==='ArrowRight')page=Math.min(pages.length-1,page+5);
-    if(k==='Enter')say(pages[page]);
-    if(k==='Escape'){screen='menu';sel=0;}
+    const P=pages[page]||{links:[]};
+    if(P.links.length){
+      if(k==='ArrowDown'){ if(lsel<P.links.length-1)lsel++; else if(page<pages.length-1){page++;lsel=0;} }
+      if(k==='ArrowUp'){ if(lsel>0)lsel--; else if(page>0){page--;lsel=Math.max(0,pages[page].links.length-1);} }
+    } else {
+      if(k==='ArrowDown')page=Math.min(pages.length-1,page+1);
+      if(k==='ArrowUp')page=Math.max(0,page-1);
+    }
+    if(k==='ArrowRight'&&page<pages.length-1){page++;lsel=pages[page].links.length?0:-1;}
+    if(k==='ArrowLeft'&&page>0){page--;lsel=pages[page].links.length?0:-1;}
+    if(k==='Enter'&&P.links[lsel]){ foot('открываю: '+P.links[lsel].s.slice(0,40)); go(P.links[lsel].h); return; }
+    if(k==='Escape'){ goBack(); return; }
   }
   paint();
 });
