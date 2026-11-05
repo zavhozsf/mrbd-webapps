@@ -3,3 +3,4 @@ bridge/tg.session*
 bridge/config.json
 __pycache__/
 bridge/tunnel.log
+bridge/serve.log
