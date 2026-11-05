@@ -45,7 +45,7 @@ html,body{width:600px;height:600px;overflow:hidden;background:#000;color:#fff;fo
 const $=id=>document.getElementById(id);
 const DEF=[['Hacker News','https://news.ycombinator.com'],['Википедия','https://ru.m.wikipedia.org'],['Reddit','https://old.reddit.com'],['РБК','https://www.rbc.ru']];
 let bms=JSON.parse(localStorage.getItem('brBm')||'null')||DEF;
-let screen='menu',sel=0,pages=[],page=0,url='',pagesText='',lsel=0,hist=[];
+let screen='menu',sel=0,pages=[],page=0,url='',pagesText='',lsel=0;
 function foot(t){$('foot').textContent=t;}
 function esc(s){return s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
 const TTS=()=>false; // озвучка пока вырублена
@@ -148,30 +148,28 @@ function paginateToks(toks){
   flush();
   return out.map(ts=>({toks:ts,links:ts.filter(t=>t.t==='a')}));
 }
-async function load(u,pushHist){
-  if(pushHist&&screen==='reader'&&url) hist.push(url);
+async function load(u){ // чистая загрузка+рендер; историей рулит браузер
   url=u; localStorage.setItem('brLast',u); screen='reader'; page=0; lsel=0; foot('читаю…'); paint2();
   try{
     const r=await fetch('https://r.jina.ai/'+u);
     if(!r.ok) throw new Error('HTTP '+r.status+' (лимит jina — повтори через минуту)');
     pages=paginateToks(mdToTokens(await r.text()));
-    page=0; lsel=pages[0]&&pages[0].links.length?0:-1; paint();
-  }catch(e){ foot('ошибка: '+e.message); screen='menu'; sel=0; paint(); }
-}
-async function go(u){
-  if(!/^https?:\/\//.test(u)) u='https://'+u.replace(/^https?:\/\//,'');
-  await load(u,true);
-}
-function goBack(){ if(hist.length){ const u=hist.pop(); url=u; load2(u); } else { screen='menu'; sel=0; paint(); } }
-async function load2(u){
-  screen='reader'; page=0; lsel=0; foot('назад…'); paint2();
-  try{
-    const r=await fetch('https://r.jina.ai/'+u);
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    pages=paginateToks(mdToTokens(await r.text()));
     lsel=pages[0]&&pages[0].links.length?0:-1; paint();
-  }catch(e){ foot('ошибка: '+e.message); screen='menu'; sel=0; paint(); }
+  }catch(e){
+    pages=[{toks:[{t:'x',s:'⚠ '+e.message}],links:[]}]; lsel=-1; paint();
+    foot('ошибка: '+e.message+' · Esc/Назад');
+  }
 }
+function go(u){
+  if(!/^https?:\/\//.test(u)) u='https://'+u.replace(/^https?:\/\//,'');
+  history.pushState({s:'r',u:u},''); load(u);
+}
+window.addEventListener('popstate',e=>{
+  const st=e.state;
+  if(st&&st.s==='r'){ if(st.u!==url) load(st.u); }
+  else { screen='menu'; sel=0; paint(); }
+});
+history.replaceState({s:'m'},'');
 function paint2(){ $('body').innerHTML='<div style="color:#0f0;padding-top:40px">гружу '+esc(url)+'…</div>'; $('ctx').textContent='читаю'; }
 
 document.addEventListener('keydown',e=>{
@@ -194,7 +192,7 @@ document.addEventListener('keydown',e=>{
     if(k==='ArrowRight'&&page<pages.length-1){page++;lsel=pages[page].links.length?0:-1;}
     if(k==='ArrowLeft'&&page>0){page--;lsel=pages[page].links.length?0:-1;}
     if(k==='Enter'&&P.links[lsel]){ foot('открываю: '+P.links[lsel].s.slice(0,40)); go(P.links[lsel].h); return; }
-    if(k==='Escape'){ goBack(); return; }
+    if(k==='Escape'){ history.back(); return; }
   }
   paint();
 });
