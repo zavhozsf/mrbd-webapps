@@ -59,12 +59,19 @@ function kbKey(e){if(kbMode==='field'){if(e.key==='Escape'||e.key==='ArrowDown')
 
 /* ===== X parser (jina markdown -> cards) ===== */
 function stripMd(s){return s.replace(/!\[[^\]]*\]\([^)]*\)/g,' ').replace(/\[([^\]]*)\]\([^)]*\)/g,'$1').replace(/ {2,}/g,' ').trim();}
-function cleanText(s){const alts=[];s=s.replace(/!\[Image \d+:\s*([^\]]*)\]\([^)]*\)/g,(m,a)=>{alts.push(a.trim());return ' ';});s=s.replace(/\[([^\]]*)\]\((?:https?:)?\/\/t\.co\/[^)]*\)/g,'$1');s=s.replace(/\[([^\]]*)\]\([^)]*\)/g,'$1');s=s.replace(/[\u202a-\u202e\u200b\ufe0f\u200d*`]/g,'').replace(/ {2,}/g,' ').trim();return {text:s,alts};}
-function parsePosts(md){
+function cleanText(s){const alts=[];s=s.replace(/!\[Image \d+:\s*([^\]]*)\]\([^)]*\)/g,(m,a)=>{a=a.trim();if(a&&!a.startsWith('@'))alts.push(a);return ' ';});s=s.replace(/\[([^\]]*)\]\((?:https?:)?\/\/t\.co\/[^)]*\)/g,'$1');s=s.replace(/\[([^\]]*)\]\([^)]*\)/g,'$1');s=s.replace(/[\u202a-\u202e\u200b\ufe0f\u200d*`]/g,'').replace(/ {2,}/g,' ').trim();return {text:s,alts};}
+function parsePosts(md,u0){
   const out=[];let started=false;
   for(const line of md.split('\n')){
     if(/^##\s.*posts$/im.test(line)){started=true;continue;} if(!started)continue;
-    const m=line.match(/^\*\s+\[\]\((?:https?:)?\/\/(?:x|twitter)\.com\/([A-Za-z0-9_]+)\/status\/(\d+)\)/); if(!m)continue;
+    const m=line.match(/^\*\s+\[\]\((?:https?:)?\/\/(?:x|twitter)\.com\/([A-Za-z0-9_]+)\/status\/(\d+)\)/);
+    if(!m){
+      if(!/^\*\s+/.test(line))continue;
+      const ct2=cleanText(line.replace(/^\*\s+/,''));
+      const t=ct2.text||(ct2.alts.length?'🖼 '+ct2.alts[0]:'');
+      if(t&&t.length>2) out.push({id:'',user:u0,name:u0,date:'',pinned:false,stats:{},quote:null,text:t,alts:ct2.alts});
+      continue;
+    }
     const id=m[2],u=m[1],pinned=/\)\s*Pinned/.test(line.slice(0,220));
     const dm=line.match(new RegExp('\\[([^\\]]+)\\]\\((?:https?:)?\\/\\/(?:x|twitter)\\.com\\/'+u+'\\/status\\/'+id+'\\)')); const date=dm?dm[1]:'';
     let stats={};const sm=line.match(new RegExp('\\[\\s*([\\d.,KM]+)\\s*\\]\\((?:https?:)?\\/\\/x\\.com\\/compose\\/post\\?in_reply_to='+id+'\\)\\s+([\\d.,KM]+)(?:\\s+([\\d.,KM]+))?(?:\\s+([\\d.,KM]+))?'));if(sm)stats={replies:sm[1],rts:sm[2]||'',favs:sm[3]||'',views:sm[4]||''};
@@ -99,7 +106,7 @@ function renderCard(){const p=posts[pIdx];$('ctx').textContent='@'+user;if(!p){$
   foot(`${pIdx+1}/${posts.length} · ↑↓ пост · Enter ветка · Esc акк-ты`);
 }
 async function loadFeed(h){const my=++req;user=h;lastOpened=h;screen='feed';pIdx=0;history.pushState({s:'f',u:h},'');$('ctx').textContent='@'+h;$('body').innerHTML='<div style="color:#0f0;padding-top:40px">гружу @'+esc(h)+'…</div>';foot('читаю…');
-  try{const r=await fetch('https://r.jina.ai/https://x.com/'+h);if(my!==req)return;if(!r.ok)throw new Error('HTTP '+r.status+' (лимит jina)');posts=parsePosts(await r.text());if(my!==req)return;if(!posts.length){$('body').innerHTML='<div style="color:#f80">Не распознал посты (сменил вёрстку X?). Подожди минуту или другой акк.</div>';foot('Назад=жест');return;}pIdx=0;renderCard();}catch(e){if(my!==req)return;$('body').innerHTML='<div style="color:#f55">⚠ '+esc(e.message)+'</div>';foot('Назад=жест');}
+  try{const r=await fetch('https://r.jina.ai/https://x.com/'+h);if(my!==req)return;if(!r.ok)throw new Error('HTTP '+r.status+' (лимит jina)');posts=parsePosts(await r.text(),h);if(my!==req)return;if(!posts.length){$('body').innerHTML='<div style="color:#f80">Не распознал посты (сменил вёрстку X?). Подожди минуту или другой акк.</div>';foot('Назад=жест');return;}pIdx=0;renderCard();}catch(e){if(my!==req)return;$('body').innerHTML='<div style="color:#f55">⚠ '+esc(e.message)+'</div>';foot('Назад=жест');}
 }
 function renderAcct(){const n=2+follows.length;$('ctx').textContent='аккаунты X';$('body').innerHTML=[['⌨ Добавить аккаунт…','']].concat(follows.map(f=>['@'+f[1],f[0]]),[['🗑 Удалить последнего открытого','']]).map((r,i)=>`<div class="rowm ${i===sel?'sel':''}">${esc(r[0])}${i&&i<n-1&&r[1]?` <span class=h>${esc(r[1])}</span>`:''}</div>`).join('');foot(`↑↓ · Enter лента · Назад=жест`);}
 let lastOpened='';
@@ -113,7 +120,7 @@ history.replaceState({s:'m'},'');
 
 document.addEventListener('keydown',e=>{if(kbOn)return kbKey(e);const k=e.key;e.preventDefault();
  if(screen==='acct'){const n=2+follows.length;if(k==='ArrowUp')sel=(sel+n-1)%n;if(k==='ArrowDown')sel=(sel+1)%n;if(k==='Enter'){if(sel===0)ask('Хэндл (без @)',v=>{if(!v)return paint();const h=v.replace(/^@/,'').trim();if(!h)return paint();if(!follows.some(f=>f[1]===h)){follows.push([h,h]);localStorage.setItem('xFol',JSON.stringify(follows));}loadFeed(h);});else if(sel===n-1){if(!lastOpened||!follows.some(f=>f[1]===lastOpened)){foot('сначала открой акк');}else if(follows.length<=1){foot('последний акк');}else{follows=follows.filter(f=>f[1]!==lastOpened);localStorage.setItem('xFol',JSON.stringify(follows));sel=0;lastOpened='';}}else loadFeed(follows[sel-1][1]);}if(k==='Delete'||k==='Backspace'){if(sel>0&&sel<=follows.length){follows.splice(sel-1,1);sel=Math.min(sel,follows.length);localStorage.setItem('xFol',JSON.stringify(follows));}}if(k==='Escape'&&history.length>1)history.back();}
- else if(screen==='feed'){if(k==='ArrowDown')pIdx=Math.min(posts.length-1,pIdx+1);if(k==='ArrowUp')pIdx=Math.max(0,pIdx-1);if(k==='Enter')openThread(posts[pIdx].id,posts[pIdx].user);if(k==='Escape')history.back();}
+ else if(screen==='feed'){if(k==='ArrowDown')pIdx=Math.min(posts.length-1,pIdx+1);if(k==='ArrowUp')pIdx=Math.max(0,pIdx-1);if(k==='Enter'){if(posts[pIdx].id)openThread(posts[pIdx].id,posts[pIdx].user);else foot('у медиа-поста нет ветки');}if(k==='Escape')history.back();}
  else {const P=pages[page]||{links:[]};if(P.links.length){if(k==='ArrowDown'){if(lsel<P.links.length-1)lsel++;else if(page<pages.length-1){page++;lsel=0;}}if(k==='ArrowUp'){if(lsel>0)lsel--;else if(page>0){page--;lsel=Math.max(0,pages[page].links.length-1);}}}else{if(k==='ArrowDown')page=Math.min(pages.length-1,page+1);if(k==='ArrowUp')page=Math.max(0,page-1);}if(k==='ArrowRight'&&page<pages.length-1){page++;lsel=pages[page].links.length?0:-1;}if(k==='ArrowLeft'&&page>0){page--;lsel=pages[page].links.length?0:-1;}if(k==='Enter'&&P.links[lsel]){window.open(P.links[lsel].h,'_blank');}if(k==='Escape')history.back();}
  paint();
 });
