@@ -56,7 +56,7 @@ const RU=['йцукенгшщзх','фывапролджэ','ячсмитьбю�
 const SP=['EN','http','://','.','␣','⌫','OK','✕'];
 let kbOn=false,kbMode='field',kbBuf='',kbR=0,kbC=0,kbRu=false,kbCb=null,kbLab='';
 function kbRows(){ return (kbRu?RU:LAT).map(r=>[...r]).concat([SP]); }
-function kbLabText(){ return kbLab+(kbMode==='field'?' · Enter — системный ввод · Esc — сетка букв':' · сетка: ↑↓←→ Enter · Esc — отмена'); }
+function kbLabText(){ return kbLab+(kbMode==='field'?' · Enter — системный ввод · ↓/Esc — сетка · ОК в сетке':' · сетка: ↑↓←→ Enter · ✕ отмена'); }
 function kbBuild(){
   const rows=kbRows();
   $('kb').innerHTML=rows.map((rw,r)=>`<div class="kbrow">`+rw.map((k,c)=>{
@@ -82,7 +82,7 @@ function kbPress(k){
 function kbKey(e){
   if(kbMode==='field'){
     // не глушим клавиши: нативное поле само решит (Enter на очках открывает системный композер)
-    if(e.key==='Escape'){ e.preventDefault(); kbMode='grid'; $('ovi').blur(); kbBuild(); }
+    if(e.key==='Escape'||e.key==='ArrowDown'){ e.preventDefault(); kbMode='grid'; $('ovi').blur(); kbBuild(); }
     return;
   }
   e.preventDefault(); const rows=kbRows();
@@ -112,8 +112,8 @@ function renderPage(){
     return esc(tk.s)+'\n';
   }).join(''):'(пусто)');
   const s=document.querySelector('.lnksel'); if(s) s.scrollIntoView({block:'center'});
-  foot(P&&P.links.length?`стр ${page+1}/${pages.length} · ссылок ${P.links.length} · ↑↓ выбор · Enter открыть · ←→ стр · Esc назад`
-      :`стр ${page+1}/${pages.length} · ссылок нет · ↑↓ страницы · Esc назад`);
+  foot(P&&P.links.length?`стр ${page+1}/${pages.length} · ссылок ${P.links.length} · ↑↓ выбор · Enter открыть · ←→ стр · Назад=жест`
+      :`стр ${page+1}/${pages.length} · ссылок нет · ↑↓ страницы · Назад=жест`);
 }
 function paint(){ screen==='menu'?renderMenu():renderPage(); }
 
