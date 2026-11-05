@@ -9,6 +9,7 @@ import asyncio, json, os, sys, time, collections, html
 
 from aiohttp import web
 from telethon import TelegramClient, events, functions, types
+from telethon.errors import SessionPasswordNeededError
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.getenv("TG_BRIDGE_PORT", "8788"))
@@ -202,10 +203,62 @@ async def login():
     print("ОК, сессия сохранена:", SESSION if (SESSION := os.path.join(HERE, "tg.session")) else "")
 
 
+def draw_qr(url):
+    import qrcode
+    qrcode.make(url).save(os.path.join(HERE, "qr.png"))
+    html_path = os.path.join(HERE, "qr.html")
+    if not os.path.exists(html_path):
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write("<html><head><meta charset='utf-8'><title>TG QR</title></head>"
+                    "<body style='background:#111;display:flex;flex-direction:column;align-items:center;justify-content:center;height:97vh;margin:0;font-family:sans-serif;color:#eee'>"
+                    "<img src='qr.png' style='width:420px;height:420px;background:#fff;padding:12px' onload=\"this.src='qr.png?x='+Date.now()\">"
+                    "<p>Открой Telegram на телефоне: Настройки → Устройства → Сканировать QR. Страница обновляется сама.</p></body></html>")
+
+
+async def login_qr():
+    if not API_ID or not API_HASH:
+        sys.exit("нет api_id/api_hash в bridge/config.json")
+    await client.connect()
+    if await client.is_user_authorized():
+        print("УЖЕ АВТОРИЗОВАН:", (await client.get_me()).string)
+        await client.disconnect()
+        return
+    qrl = await client.qr_login()
+    print("QR-ЛОГИН: открой bridge/qr.html или сканируй bridge/qr.png", flush=True)
+    while True:
+        draw_qr(qrl.url)
+        try:
+            user = await qrl.wait()  # ждёт до истечения токена
+            print("AUTH OK:", user.username or user.phone or user.id, flush=True)
+            break
+        except SessionPasswordNeededError:
+            import getpass
+            pwd = getpass.getpass("2FA пароль: ")
+            await client.sign_in(password=pwd)
+            print("AUTH OK (2FA):", (await client.get_me()).string, flush=True)
+            break
+        except Exception as e:
+            # истёк/просрочен — ротируем и ждём заново
+            name = type(e).__name__
+            if "Timeout" in name or "PasswordNeeded" in name:
+                if name == "SessionPasswordNeededError":
+                    raise
+            print("QR истёк/не просканирован (%s) — новый код…" % name, flush=True)
+            try:
+                await qrl.recreate()
+            except Exception as e2:
+                print("recreate failed:", e2, flush=True)
+                await asyncio.sleep(3)
+    await client.disconnect()
+
+
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "serve"
     if mode == "login":
         asyncio.run(login())
+        return
+    if mode == "login-qr":
+        asyncio.run(login_qr())
         return
     if not API_ID or not API_HASH:
         print("ВНИМАНИЕ: нет api_id/api_hash — API будет отвечать authed:false")

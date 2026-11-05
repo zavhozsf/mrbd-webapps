@@ -11,25 +11,33 @@
 <style>
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
 html,body{width:600px;height:600px;overflow:hidden;background:#000;color:#fff;font-family:system-ui,sans-serif;user-select:none}
-#app{width:600px;height:600px;display:flex;flex-direction:column}
+#app{width:600px;height:600px;display:flex;flex-direction:column;position:relative}
 #head{padding:12px 24px;font-size:24px;font-weight:700;border-bottom:2px solid #222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #head b{color:#0f0}
 #list{flex:1;overflow-y:auto;scrollbar-width:none;display:flex;flex-direction:column}
-.row{min-height:84px;padding:8px 24px;border-left:6px solid transparent;display:flex;flex-direction:column;justify-content:center}
+.row{min-height:84px;padding:8px 24px;border-left:6px solid transparent;display:flex;flex-direction:column;justify-content:center;flex-shrink:0}
 .row .t{font-size:24px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .row .s{font-size:19px;color:#aaa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .row .s .unread{color:#ff0;font-weight:700;margin-right:10px}
 .row.sel{border-left-color:#0f0;background:#0a140a}
 .row.sel .t{color:#0f0}
 #foot{padding:12px 20px;font-size:19px;color:#bbb;border-top:2px solid #222;min-height:50px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#ov{position:absolute;inset:0;background:#000;display:none;flex-direction:column;justify-content:center;padding:40px}
-#ov label{font-size:22px;color:#0f0;margin-bottom:16px}
-#ov input{width:100%;min-height:88px;background:#000;border:2px solid #0f0;color:#fff;font-size:26px;padding:8px 16px;font-family:inherit}
-.msg{padding:6px 24px;border-left:6px solid transparent}
+.msg{padding:6px 24px;border-left:6px solid transparent;flex-shrink:0}
 .msg.sel{border-left-color:#0f0;background:#0a140a}
 .msg .m{font-size:22px;line-height:1.25}
 .msg .who{color:#8cf;font-weight:700}
 .msg.out .who{color:#888}
+/* on-screen D-pad keyboard */
+#ov{position:absolute;inset:0;background:#000;display:none;flex-direction:column;z-index:5}
+#kblab{padding:10px 20px;font-size:20px;color:#0f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#kbv{padding:8px 20px;font-size:26px;min-height:74px;border-bottom:2px solid #222;white-space:pre-wrap;word-break:break-all;color:#fff}
+#kbv::after{content:'▌';color:#0f0}
+#kb{flex:1;display:flex;flex-direction:column;justify-content:center;gap:5px;padding:6px 10px}
+.kbrow{display:flex;gap:5px;justify-content:center}
+.kbkey{width:50px;height:56px;display:flex;align-items:center;justify-content:center;font-size:23px;border:2px solid #333;background:#0a0a0a;flex-shrink:0}
+.kbkey.sel{border-color:#0f0;color:#0f0;background:#0a1e0a}
+.kbkey.sp{width:64px;font-size:19px;color:#8cf}
+.kbkey.sp.sel{color:#0f0;border-color:#0f0}
 </style>
 </head>
 <body>
@@ -37,85 +45,129 @@ html,body{width:600px;height:600px;overflow:hidden;background:#000;color:#fff;fo
   <div id="head">Telegram <b id="srv">нет сервера</b></div>
   <div id="list"></div>
   <div id="foot">↑↓ выбор · Enter открыть · Esc назад</div>
-  <div id="ov"><label id="ovl"></label><input id="ovi" enterkeyhint="send"></div>
+  <div id="ov">
+    <div id="kblab"></div>
+    <div id="kbv"></div>
+    <div id="kb"></div>
+  </div>
 </div>
 <script>
 'use strict';
 const $=id=>document.getElementById(id);
 let server=localStorage.getItem('tgServer')||'';
+{ const q=new URLSearchParams(location.search).get('server'); if(q&&/^https?:\/\//.test(q)){server=q;localStorage.setItem('tgServer',server);} }
 let screen='chats', sel=0, chats=[], msgs=[], curChat=null, lastTs=parseInt(localStorage.getItem('tgLastTs')||'0',10);
-let ovCb=null;
 const ttsOn=()=>localStorage.getItem('tgTts')!=='0';
 function say(t){ if(!ttsOn()||!('speechSynthesis' in window))return; const u=new SpeechSynthesisUtterance(t.slice(0,280)); speechSynthesis.cancel(); speechSynthesis.speak(u); }
 function foot(t){ $('foot').textContent=t; }
-function head(){ $('srv').textContent=server? (server.startsWith('http')?server.replace(/^https?:\/\//,'').slice(0,28):'??') :'нет сервера'; }
+function head(){ $('srv').textContent=server? server.replace(/^https?:\/\//,'').slice(0,30) :'нет сервера'; }
 async function api(p,opt){ if(!server) throw new Error('укажи сервер'); const r=await fetch(server.replace(/\/$/,'')+p,opt); if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }
 
-function ask(label,cb,val){ $('ovl').textContent=label; $('ovi').value=val||''; $('ov').style.display='flex'; setTimeout(()=>$('ovi').focus(),50); ovCb=cb; }
-$('ovi').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); $('ov').style.display='none'; const v=$('ovi').value.trim(); const cb=ovCb; ovCb=null; cb&&cb(v);} if(e.key==='Escape'){ e.preventDefault(); $('ov').style.display='none'; const cb=ovCb; ovCb=null; cb&&cb(''); } });
+/* ===== on-screen D-pad keyboard ===== */
+const LAT=['qwertyuiop','asdfghjkl','zxcvbnm'];
+const RU=['йцукенгшщзх','фывапролджэ','ячсмитьбюё'];
+const SP=['EN','http','.','␣','⌫','OK','✕'];
+let kbOn=false,kbBuf='',kbR=0,kbC=0,kbRu=false,kbCb=null;
+function kbRows(){ return (kbRu?RU:LAT).map(r=>[...r]).concat([SP]); }
+function kbBuild(){
+  const rows=kbRows();
+  $('kb').innerHTML=rows.map((rw,r)=>`<div class="kbrow">`+rw.map((k,c)=>{
+    const sp=SP.includes(k); const label=(k===' '?'␣':k);
+    return `<div class="kbkey ${sp?'sp':''} ${r===kbR&&c===kbC?'sel':''}">${label}</div>`;}).join('')+`</div>`).join('');
+  $('kbv').textContent=kbBuf;
+}
+function ask(label,cb,val){ kbOn=true; kbBuf=val||''; kbR=0; kbC=0; kbRu=/[а-яё]/i.test(val||''); kbCb=cb; $('kblab').textContent=label; $('ov').style.display='flex'; kbBuild(); }
+function kbDone(v){ kbOn=false; $('ov').style.display='none'; const cb=kbCb; kbCb=null; cb&&cb(v); }
+function kbPress(k){
+  if(k==='⌫') kbBuf=kbBuf.slice(0,-1);
+  else if(k==='␣'||k===' ') kbBuf+=' ';
+  else if(k==='OK') return kbDone(kbBuf.trim());
+  else if(k==='✕') return kbDone('');
+  else if(k==='EN'){ kbRu=!kbRu; }
+  else if(k==='http') kbBuf+='http://';
+  else kbBuf+=k;
+  kbC=Math.min(kbC,kbRows()[kbR].length-1); kbBuild();
+}
+function kbKey(e){
+  e.preventDefault(); const rows=kbRows();
+  const maxc=rows[kbR].length-1;
+  if(e.key==='ArrowLeft') kbC=Math.max(0,kbC-1);
+  else if(e.key==='ArrowRight') kbC=Math.min(maxc,kbC+1);
+  else if(e.key==='ArrowUp'){ kbR=Math.max(0,kbR-1); kbC=Math.min(kbC,rows[kbR].length-1); }
+  else if(e.key==='ArrowDown'){ kbR=Math.min(rows.length-1,kbR+1); kbC=Math.min(kbC,rows[kbR].length-1); }
+  else if(e.key==='Enter'){ const k=rows[kbR][kbC]; return kbPress(k===' '?'␣':k); }
+  else if(e.key==='Escape') return kbDone('');
+  else return;
+  kbBuild();
+}
+/* =============================== */
 
 function renderChats(){
-  $('list').innerHTML=chats.map((c,i)=>`<div class="row ${i===sel?'sel':''}" data-i="${i}">
-    <div class="t">${c.title}</div><div class="s">${c.unread?`<span class="unread">${c.unread>99?'99+':c.unread}</span>`:''}${c.last||''}</div></div>`).join('');
+  const rows=chats.map((c,i)=>`<div class="row ${i===sel?'sel':''}"><div class="t">${c.title}</div><div class="s">${c.unread?`<span class="unread">${c.unread>99?'99+':c.unread}</span>`:''}${c.last||''}</div></div>`);
+  rows.push(`<div class="row ${sel===chats.length?'sel':''}"><div class="t">⚙ Сервер: ${server?server.replace(/^https?:\/\//,''):'— не задан'}</div><div class="s">Enter — ввести адрес моста</div></div>`);
+  $('list').innerHTML=rows.join('');
 }
 function renderMsgs(){
-  $('list').innerHTML=`<div class="msg" data-s="top"><div class="m" style="color:#0f0">↩ Ответить диктовкой (Enter)</div></div>`+
-  msgs.map((m,i)=>`<div class="msg ${i===sel-1?'sel':''} ${m.out?'out':''}" data-i="${i}"><div class="m"><span class="who">${m.out?'я':m.name}:</span> ${m.text}</div></div>`).join('');
+  $('list').innerHTML=`<div class="msg ${sel===0?'sel':''}"><div class="m" style="color:#0f0">✎ Ответить (Enter)</div></div>`+
+  msgs.map((m,i)=>`<div class="msg ${i===sel-1?'sel':''} ${m.out?'out':''}"><div class="m"><span class="who">${m.out?'я':m.name}:</span> ${m.text}</div></div>`).join('');
   const s=document.querySelector('.msg.sel'); if(s) s.scrollIntoView({block:'center'});
 }
 function paint(){ screen==='chats'?renderChats():renderMsgs(); }
 
 async function openChat(c){
-  screen='thread'; sel=0; curChat=c; head();
-  foot('гружу…');
+  screen='thread'; sel=0; curChat=c; foot('гружу…');
   const d=await api('/api/messages?chat='+c.id+'&limit=30');
   msgs=d.messages;
   try{ await api('/api/read',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({chat:c.id})}); }catch(e){}
-  paint(); foot('↑↓ листать · Enter озвучить · ↑верх=ответ · Esc назад');
+  paint(); foot('↑↓ листать · Enter озвучить · верх=ответ · Esc назад');
 }
 
 async function poll(){
-  if(!server){ screen='chats'; $('list').innerHTML='<div class="row sel"><div class="t">⚙ Укажи адрес моста</div><div class="s">Enter — ввести URL моста (http://… или https://…)</div></div>'; return; }
+  if(!server){ chats=[]; paint(); foot('заполни строку ⚙ Сервер ниже (Enter)'); return; }
   try{
     const st=await api('/api/state');
-    if(!st.authed){ foot('мост онлайн, но не залогинен (login на ПК)'); }
+    if(!st.authed) foot('мост онлайн, но не залогинен (QR-логин на ПК)');
     const ev=await api('/api/events?since='+lastTs);
     for(const e of ev.events.slice(-3)) say(`Сообщение от ${e.name}: ${e.text}`);
     if(ev.events.length){ lastTs=Math.max(...ev.events.map(e=>e.ts),lastTs); localStorage.setItem('tgLastTs',String(lastTs)); }
     const d=await api('/api/chats');
     chats=d.chats;
-    if(screen==='chats') paint();
-    foot('ок · '+new Date().toLocaleTimeString()+' · Esc=меню настроек');
+    if(screen==='chats'){ sel=Math.min(sel,chats.length); paint(); foot('ок '+new Date().toLocaleTimeString()+' · Esc — команды'); }
   }catch(e){ foot('ошибка: '+e.message); }
 }
 
 async function sendReply(text){
   if(!text) return;
-  try{ await api('/api/send',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({chat:curChat.id,text})}); foot('отправлено'); say('отправлено'); openChat(curChat); }
+  try{ await api('/api/send',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({chat:curChat.id,text})}); say('отправлено'); openChat(curChat); }
   catch(e){ foot('не отправлено: '+e.message); }
 }
+function setServer(v){ if(/^https?:\/\//.test(v)){ server=v; localStorage.setItem('tgServer',v); head(); poll(); } }
 
-const count=()=>screen==='chats'?chats.length:(msgs.length+1);
-const max=()=>Math.max(0,count()-1);
-document.addEventListener('keydown',async e=>{
-  if($('ov').style.display==='flex') return;
+const maxSel=()=>screen==='chats'?chats.length:(msgs.length);
+document.addEventListener('keydown',e=>{
+  if(kbOn) return kbKey(e);
   const k=e.key;
-  if(k==='ArrowUp'||k==='ArrowDown'){ sel=Math.min(max(),Math.max(0,sel+(k==='ArrowUp'?-1:1)));
-    if(screen==='chats') await poll0(); else paint(); e.preventDefault(); }
+  if(k==='ArrowUp'||k==='ArrowDown'){ e.preventDefault(); sel=Math.min(maxSel(),Math.max(0,sel+(k==='ArrowUp'?-1:1))); paint(); }
   else if(k==='Enter'){
     e.preventDefault();
     if(screen==='chats'){
-      if(!server) return ask('URL моста (напр. https://xxx.trycloudflare.com)',v=>{ if(/^https?:\/\//.test(v)){ server=v; localStorage.setItem('tgServer',v); head(); poll(); } });
-      if(chats[sel]) openChat(chats[sel]).catch(e=>foot('ошибка: '+e.message));
+      if(sel===chats.length) return ask('Адрес моста (https://… или http://IP:8788)',setServer,server);
+      if(chats[sel]) openChat(chats[sel]).catch(er=>foot('ошибка: '+er.message));
     } else {
-      if(sel===0) return ask('Ответ '+curChat.title,v=>v&&sendReply(v));
+      if(sel===0) return ask('Ответ: '+(curChat?curChat.title:''),v=>v&&sendReply(v),'');
       const m=msgs[sel-1]; if(m) say((m.out?'':m.name+': ')+m.text);
     }
   }
-  else if(k==='Escape'){ e.preventDefault(); if(screen==='thread'){ screen='chats'; sel=0; paint(); } else ask('Команды: server=<URL>, tts=on/off',v=>{ if(v.startsWith('server=')){server=v.slice(7).trim();localStorage.setItem('tgServer',server);head();poll();} if(v==='tts=off'){localStorage.setItem('tgTts','0');foot('TTS выкл');} if(v==='tts=on'){localStorage.setItem('tgTts','1');say('голос вкл');} }); }
-  function noop(){}
+  else if(k==='Escape'){
+    e.preventDefault();
+    if(screen==='thread'){ screen='chats'; sel=0; paint(); }
+    else ask('Команда: server=… / tts=on / tts=off',v=>{
+      if(v.startsWith('server=')) setServer(v.slice(7).trim());
+      else if(v==='tts=off'){ localStorage.setItem('tgTts','0'); foot('TTS выкл'); }
+      else if(v==='tts=on'){ localStorage.setItem('tgTts','1'); say('голос вкл'); }
+    },'');
+  }
 });
-async function poll0(){ renderChats(); }
 head(); paint(); poll(); setInterval(poll,15000);
 </script>
 </body>
