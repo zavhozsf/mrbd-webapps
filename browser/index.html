@@ -43,7 +43,7 @@ html,body{width:600px;height:600px;overflow:hidden;background:#000;color:#fff;fo
 <script>
 'use strict';
 const $=id=>document.getElementById(id);
-const DEF=[['Hacker News','https://news.ycombinator.com'],['Википедия','https://ru.m.wikipedia.org'],['Reddit','https://old.reddit.com'],['РБК','https://www.rbc.ru']];
+const DEF=[['Hacker News','https://news.ycombinator.com'],['Хабр (RU)','https://habr.com/ru/'],['Википедия','https://ru.m.wikipedia.org'],['Reddit','https://old.reddit.com'],['РБК','https://www.rbc.ru']];
 let bms=JSON.parse(localStorage.getItem('brBm')||'null')||DEF;
 let screen='menu',sel=0,pages=[],page=0,url='',pagesText='',lsel=0;
 function foot(t){$('foot').textContent=t;}
