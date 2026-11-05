@@ -26,7 +26,7 @@ def load_cfg():
 CFG = load_cfg()
 API_ID = int(os.getenv("TG_API_ID") or CFG.get("api_id") or 0)
 API_HASH = os.getenv("TG_API_HASH") or CFG.get("api_hash") or ""
-client = TelegramClient(os.path.join(HERE, "tg.session"), API_ID, API_HASH)
+client = TelegramClient(os.path.join(HERE, "tg.session"), API_ID or 1, API_HASH or "unconfigured")
 
 evbuf = collections.deque(maxlen=EVENTS_MAX)
 dialogs_cache = {}  # peer id -> entity
