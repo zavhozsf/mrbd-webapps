@@ -20,8 +20,7 @@ html,body{width:600px;height:600px;overflow:hidden;background:#000;color:#fff;fo
 #foot{padding:12px 20px;font-size:19px;color:#bbb;border-top:2px solid #222;min-height:50px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #ov{position:absolute;inset:0;background:#000;display:none;flex-direction:column;z-index:5}
 #kblab{padding:10px 20px;font-size:20px;color:#0f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#kbv{padding:8px 20px;font-size:26px;min-height:74px;border-bottom:2px solid #222;white-space:pre-wrap;word-break:break-all;color:#fff}
-#kbv::after{content:'▌';color:#0f0}
+#ovi{width:calc(100% - 40px);margin:0 20px;min-height:80px;background:#000;border:2px solid #0f0;color:#fff;font-size:26px;padding:6px 14px;font-family:inherit}
 #kb{flex:1;display:flex;flex-direction:column;justify-content:center;gap:5px;padding:6px 10px}
 .kbrow{display:flex;gap:5px;justify-content:center}
 .kbkey{width:50px;height:56px;display:flex;align-items:center;justify-content:center;font-size:23px;border:2px solid #333;background:#0a0a0a;flex-shrink:0}
@@ -35,7 +34,7 @@ html,body{width:600px;height:600px;overflow:hidden;background:#000;color:#fff;fo
   <div id="head">Browser <b id="ctx">меню</b></div>
   <div id="body"></div>
   <div id="foot">↑↓ · Enter выбрать · Esc назад</div>
-  <div id="ov"><div id="kblab"></div><div id="kbv"></div><div id="kb"></div></div>
+  <div id="ov"><div id="kblab"></div><input id="ovi" enterkeyhint="go" autocomplete="off" autocorrect="off" spellcheck="false"><div id="kb"></div></div>
 </div>
 <script>
 'use strict';
@@ -47,20 +46,23 @@ function foot(t){$('foot').textContent=t;}
 function say(t){ if(!('speechSynthesis' in window))return; const u=new SpeechSynthesisUtterance(t.slice(0,900)); speechSynthesis.cancel(); speechSynthesis.speak(u); }
 function esc(s){return s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
 
-/* ===== on-screen D-pad keyboard ===== */
+/* ===== ввод: нативный композер + D-pad запасная сетка ===== */
 const LAT=['qwertyuiop','asdfghjkl','zxcvbnm'];
 const RU=['йцукенгшщзх','фывапролджэ','ячсмитьбюё'];
-const SP=['EN','http','.','␣','⌫','OK','✕'];
-let kbOn=false,kbBuf='',kbR=0,kbC=0,kbRu=false,kbCb=null;
+const SP=['EN','http','://','.','␣','⌫','OK','✕'];
+let kbOn=false,kbMode='field',kbBuf='',kbR=0,kbC=0,kbRu=false,kbCb=null,kbLab='';
 function kbRows(){ return (kbRu?RU:LAT).map(r=>[...r]).concat([SP]); }
+function kbLabText(){ return kbLab+(kbMode==='field'?' · Enter — системный ввод · Esc — сетка букв':' · сетка: ↑↓←→ Enter · Esc — отмена'); }
 function kbBuild(){
   const rows=kbRows();
   $('kb').innerHTML=rows.map((rw,r)=>`<div class="kbrow">`+rw.map((k,c)=>{
     const sp=SP.includes(k); const label=(k===' '?'␣':k);
-    return `<div class="kbkey ${sp?'sp':''} ${r===kbR&&c===kbC?'sel':''}">${label}</div>`;}).join('')+`</div>`).join('');
-  $('kbv').textContent=kbBuf;
+    return `<div class="kbkey ${sp?'sp':''} ${kbMode==='grid'&&r===kbR&&c===kbC?'sel':''}">${label}</div>`;}).join('')+`</div>`).join('');
+  if($('ovi').value!==kbBuf)$('ovi').value=kbBuf;
+  $('kblab').textContent=kbLabText();
 }
-function ask(label,cb,val){ kbOn=true; kbBuf=val||''; kbR=0; kbC=0; kbRu=/[а-яё]/i.test(val||''); kbCb=cb; $('kblab').textContent=label; $('ov').style.display='flex'; kbBuild(); }
+function ask(label,cb,val){ kbOn=true; kbMode='field'; kbBuf=val||''; kbR=0; kbC=0; kbRu=/[а-яё]/i.test(val||''); kbCb=cb; kbLab=label; $('ov').style.display='flex'; kbBuild(); setTimeout(()=>$('ovi').focus(),80); }
+$('ovi').addEventListener('input',e=>{ kbBuf=e.target.value; $('kblab').textContent=kbLabText(); });
 function kbDone(v){ kbOn=false; $('ov').style.display='none'; const cb=kbCb; kbCb=null; cb&&cb(v); }
 function kbPress(k){
   if(k==='⌫') kbBuf=kbBuf.slice(0,-1);
@@ -68,11 +70,17 @@ function kbPress(k){
   else if(k==='OK') return kbDone(kbBuf.trim());
   else if(k==='✕') return kbDone('');
   else if(k==='EN'){ kbRu=!kbRu; }
-  else if(k==='http') kbBuf+='http://';
+  else if(k==='http') kbBuf+='http';
+  else if(k==='://') kbBuf+='://';
   else kbBuf+=k;
   kbC=Math.min(kbC,kbRows()[kbR].length-1); kbBuild();
 }
 function kbKey(e){
+  if(kbMode==='field'){
+    // не глушим клавиши: нативное поле само решит (Enter на очках открывает системный композер)
+    if(e.key==='Escape'){ e.preventDefault(); kbMode='grid'; $('ovi').blur(); kbBuild(); }
+    return;
+  }
   e.preventDefault(); const rows=kbRows();
   const maxc=rows[kbR].length-1;
   if(e.key==='ArrowLeft') kbC=Math.max(0,kbC-1);
@@ -84,7 +92,7 @@ function kbKey(e){
   else return;
   kbBuild();
 }
-/* =============================== */
+/* ======================================================== */
 
 function renderMenu(){
   $('ctx').textContent='меню';
