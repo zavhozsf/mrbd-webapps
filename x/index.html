@@ -41,6 +41,11 @@ const $=id=>document.getElementById(id);
 const DEF=[['naval','naval'],['Elon Musk','elonmusk'],['Paul Graham','paulg'],['Andrej Karpathy','karpathy'],['NASA','NASA']];
 let follows=JSON.parse(localStorage.getItem('xFol')||'null')||DEF;
 let screen='acct',sel=0,posts=[],pIdx=0,user='',req=0;
+const SRV=((new URLSearchParams(location.search)).get('server')||'').replace(/\/+$/,'');
+let homeOK=null,lastOpened='';
+function nf(n){n=String(n==null?'':n);const v=parseFloat(n.replace(/[^\d.]/g,''));if(!v)return '';return v>=1e6?(v/1e6).toFixed(1).replace('.0','')+'M':v>=1000?(v/1000).toFixed(1).replace('.0','')+'K':String(Math.round(v));}
+function sp2card(p){const s=p.stats||{};return{id:p.id||'',user:p.user||'',name:p.name||p.user||'?',date:p.date||'',pinned:false,stats:{replies:nf(s.replies),rts:nf(s.rts),favs:nf(s.favs),views:nf(s.views)},quote:p.quote&&(p.quote.text?{handle:p.quote.handle||'',date:'',text:p.quote.text}:null),media:p.media,img:p.img||'',text:p.text||(p.img?'🖼 медиа':''),alts:[]};}
+if(SRV){try{fetch(SRV+'/api/state').then(r=>r.json()).then(j=>{homeOK=!!j.logged_in;if(screen==='acct')paint();}).catch(()=>{homeOK=false;if(screen==='acct')paint();});}catch(e){homeOK=false;}}
 function foot(t){$('foot').textContent=t;}
 function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
 
@@ -99,17 +104,26 @@ async function openThread(id,u){const my=++req;turl='https://x.com/'+u+'/status/
 }
 
 /* ===== feed ===== */
-function renderCard(){const p=posts[pIdx];$('ctx').textContent='@'+user;if(!p){$('body').innerHTML='<div style="color:#555">пусто</div>';return;}
+function renderCard(){const p=posts[pIdx];$('ctx').textContent=user==='__home'?'🏠 лента':user==='__me'?'👤 профиль':'@'+user;if(!p){$('body').innerHTML='<div style="color:#555">пусто</div>';return;}
   const st=p.stats||{};const stat=[st.replies&&('💬 '+st.replies),st.rts&&('🔁 '+st.rts),st.favs&&('♥ '+st.favs),st.views&&('👁 '+st.views)].filter(Boolean).join('   ');
   const q=p.quote?`<div class=quote><b>@${esc(p.quote.handle)}</b> ${esc(p.quote.date)}<div class=qtx>${esc(p.quote.text)}</div></div>`:'';
-  $('body').innerHTML=`<div class=card><div class=chead><span class=nm>${esc(p.name||p.user)}</span><span>@${esc(p.user)}</span><span>·</span><span>${esc(p.date)}</span>${p.pinned?'<span class=pin>📌 закреп</span>':''}</div><div class=ctext>${esc(p.text)}</div>${q}${stat?`<div class=cstat>${stat}</div>`:''}</div>`;
+  $('body').innerHTML=`<div class=card><div class=chead><span class=nm>${esc(p.name||p.user)}</span><span>@${esc(p.user)}</span><span>·</span><span>${esc(p.date)}</span>${p.pinned?'<span class=pin>📌 закреп</span>':''}</div><div class=ctext>${esc(p.text)}${p.img?`<br><img src="${esc(p.img)}" style="max-width:100%;max-height:190px;margin-top:8px;border:2px solid #333;border-radius:8px">`:''}</div>${q}${stat?`<div class=cstat>${stat}</div>`:''}</div>`;
   foot(`${pIdx+1}/${posts.length} · ↑↓ пост · Enter ветка · Esc акк-ты`);
 }
-async function loadFeed(h){const my=++req;user=h;lastOpened=h;screen='feed';pIdx=0;history.pushState({s:'f',u:h},'');$('ctx').textContent='@'+h;$('body').innerHTML='<div style="color:#0f0;padding-top:40px">гружу @'+esc(h)+'…</div>';foot('читаю…');
-  try{const r=await fetch('https://r.jina.ai/https://x.com/'+h);if(my!==req)return;if(!r.ok)throw new Error('HTTP '+r.status+' (лимит jina)');posts=parsePosts(await r.text(),h);if(my!==req)return;if(!posts.length){$('body').innerHTML='<div style="color:#f80">Не распознал посты (сменил вёрстку X?). Подожди минуту или другой акк.</div>';foot('Назад=жест');return;}pIdx=0;renderCard();}catch(e){if(my!==req)return;$('body').innerHTML='<div style="color:#f55">⚠ '+esc(e.message)+'</div>';foot('Назад=жест');}
+async function loadFeed(h){const my=++req;user=h;lastOpened=(h==='__home'||h==='__me')?lastOpened:h;screen='feed';pIdx=0;history.pushState({s:'f',u:h},'');$('ctx').textContent=h==='__home'?'🏠 лента':h==='__me'?'👤 профиль':'@'+h;$('body').innerHTML='<div style="color:#0f0;padding-top:40px">гружу…</div>';foot(SRV?'через локальный мост…':'читаю…');
+  let list=null;
+  if(SRV){const u=h==='__home'?SRV+'/api/home':h==='__me'?SRV+'/api/me':SRV+'/api/user/'+h;
+    try{const j=await(await fetch(u)).json();if(j&&j.posts&&(j.posts.length||h==='__home'||h==='__me'))list=j.posts.map(sp2card);}catch(e){}}
+  if(!list||!list.length){
+    if(h==='__home'||h==='__me'){list=[];}
+    else{try{const r=await fetch('https://r.jina.ai/https://x.com/'+h);if(!r.ok)throw new Error('HTTP '+r.status);list=parsePosts(await r.text(),h);}catch(e){list=null;}if(list===null){$('body').innerHTML='<div style="color:#f55">⚠ сеть/лимит</div>';foot('Назад=жест');return;}}
+  }
+  if(my!==req)return;
+  posts=list;if(!posts.length){$('body').innerHTML='<div style="color:#f80">Пусто. '+(h==='__home'||h==='__me'?'Мост не залогинен — запусти <b>tw_bridge login</b>.':'Не распознал посты.')+'</div>';foot('Назад=жест');return;}
+  pIdx=0;renderCard();
 }
-function renderAcct(){const n=2+follows.length;$('ctx').textContent='аккаунты X';$('body').innerHTML=[['⌨ Добавить аккаунт…','']].concat(follows.map(f=>['@'+f[1],f[0]]),[['🗑 Удалить последнего открытого','']]).map((r,i)=>`<div class="rowm ${i===sel?'sel':''}">${esc(r[0])}${i&&i<n-1&&r[1]?` <span class=h>${esc(r[1])}</span>`:''}</div>`).join('');foot(`↑↓ · Enter лента · Назад=жест`);}
-let lastOpened='';
+function acctRows(){const r=[];if(SRV)r.push({l:'🏠 Домашняя лента'+(homeOK===false?' (⚠ не залогинен)':homeOK===true?' ✓':' …'),a:'go',h:'__home'});r.push({l:'⌨ Добавить аккаунт…',a:'add'});for(const f of follows)r.push({l:'@'+f[1],s:f[0],a:'go',h:f[1]});if(SRV)r.push({l:'👤 Мой профиль',a:'go',h:'__me'});r.push({l:'🗑 Удалить последнего открытого',a:'del'});return r;}
+function renderAcct(){const rows=acctRows();$('ctx').textContent='аккаунты X';$('body').innerHTML=rows.map((r,i)=>`<div class="rowm ${i===sel?'sel':''}">${esc(r.l)}${r.s?` <span class=h>${esc(r.s)}</span>`:''}</div>`).join('');foot(SRV?'сервер ✓ · ↑↓ · Enter лента':'↑↓ · Enter лента · Назад=жест');}
 function paint(){if(screen==='acct')renderAcct();else if(screen==='feed')renderCard();else renderThread();}
 
 window.addEventListener('popstate',e=>{const st=e.state;
@@ -119,7 +133,7 @@ window.addEventListener('popstate',e=>{const st=e.state;
 history.replaceState({s:'m'},'');
 
 document.addEventListener('keydown',e=>{if(kbOn)return kbKey(e);const k=e.key;e.preventDefault();
- if(screen==='acct'){const n=2+follows.length;if(k==='ArrowUp')sel=(sel+n-1)%n;if(k==='ArrowDown')sel=(sel+1)%n;if(k==='Enter'){if(sel===0)ask('Хэндл (без @)',v=>{if(!v)return paint();const h=v.replace(/^@/,'').trim();if(!h)return paint();if(!follows.some(f=>f[1]===h)){follows.push([h,h]);localStorage.setItem('xFol',JSON.stringify(follows));}loadFeed(h);});else if(sel===n-1){if(!lastOpened||!follows.some(f=>f[1]===lastOpened)){foot('сначала открой акк');}else if(follows.length<=1){foot('последний акк');}else{follows=follows.filter(f=>f[1]!==lastOpened);localStorage.setItem('xFol',JSON.stringify(follows));sel=0;lastOpened='';}}else loadFeed(follows[sel-1][1]);}if(k==='Delete'||k==='Backspace'){if(sel>0&&sel<=follows.length){follows.splice(sel-1,1);sel=Math.min(sel,follows.length);localStorage.setItem('xFol',JSON.stringify(follows));}}if(k==='Escape'&&history.length>1)history.back();}
+ if(screen==='acct'){const rows=acctRows(),n=rows.length;if(k==='ArrowUp')sel=(sel+n-1)%n;if(k==='ArrowDown')sel=(sel+1)%n;if(k==='Enter'){const r=rows[sel]||{};if(r.a==='add')ask('Хэндл (без @)',v=>{if(!v)return paint();const h=v.replace(/^@/,'').trim();if(!h)return paint();if(!follows.some(f=>f[1]===h)){follows.push([h,h]);localStorage.setItem('xFol',JSON.stringify(follows));}loadFeed(h);});else if(r.a==='del'){if(!lastOpened||!follows.some(f=>f[1]===lastOpened))foot('сначала открой акк');else if(follows.length<=1)foot('последний акк');else{follows=follows.filter(f=>f[1]!==lastOpened);localStorage.setItem('xFol',JSON.stringify(follows));sel=0;lastOpened='';}}else if(r.a==='go')loadFeed(r.h);}if(k==='Escape'&&history.length>1)history.back();}
  else if(screen==='feed'){if(k==='ArrowDown')pIdx=Math.min(posts.length-1,pIdx+1);if(k==='ArrowUp')pIdx=Math.max(0,pIdx-1);if(k==='Enter'){if(posts[pIdx].id)openThread(posts[pIdx].id,posts[pIdx].user);else foot('у медиа-поста нет ветки');}if(k==='Escape')history.back();}
  else {const P=pages[page]||{links:[]};if(P.links.length){if(k==='ArrowDown'){if(lsel<P.links.length-1)lsel++;else if(page<pages.length-1){page++;lsel=0;}}if(k==='ArrowUp'){if(lsel>0)lsel--;else if(page>0){page--;lsel=Math.max(0,pages[page].links.length-1);}}}else{if(k==='ArrowDown')page=Math.min(pages.length-1,page+1);if(k==='ArrowUp')page=Math.max(0,page-1);}if(k==='ArrowRight'&&page<pages.length-1){page++;lsel=pages[page].links.length?0:-1;}if(k==='ArrowLeft'&&page>0){page--;lsel=pages[page].links.length?0:-1;}if(k==='Enter'&&P.links[lsel]){window.open(P.links[lsel].h,'_blank');}if(k==='Escape')history.back();}
  paint();

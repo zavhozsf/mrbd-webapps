@@ -5,3 +5,6 @@ __pycache__/
 bridge/tunnel.log
 bridge/serve.log
 bridge/cloudflared.exe
+
+twprofile/
+tw_url.txt
