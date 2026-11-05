@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=600, height=600, initial-scale=1.0, user-scalable=no">
+<meta name="mrbd-web-app-capable" content="yes">
+<meta name="application-name" content="Telegram">
+<meta name="theme-color" content="#000000">
+<title>Telegram</title>
+<link rel="icon" type="image/png" href="../favicon.png">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html,body{width:600px;height:600px;overflow:hidden;background:#000;color:#fff;font-family:system-ui,sans-serif;user-select:none}
+#app{width:600px;height:600px;display:flex;flex-direction:column}
+#head{padding:12px 24px;font-size:24px;font-weight:700;border-bottom:2px solid #222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#head b{color:#0f0}
+#list{flex:1;overflow-y:auto;scrollbar-width:none;display:flex;flex-direction:column}
+.row{min-height:84px;padding:8px 24px;border-left:6px solid transparent;display:flex;flex-direction:column;justify-content:center}
+.row .t{font-size:24px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .s{font-size:19px;color:#aaa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .s .unread{color:#ff0;font-weight:700;margin-right:10px}
+.row.sel{border-left-color:#0f0;background:#0a140a}
+.row.sel .t{color:#0f0}
+#foot{padding:12px 20px;font-size:19px;color:#bbb;border-top:2px solid #222;min-height:50px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#ov{position:absolute;inset:0;background:#000;display:none;flex-direction:column;justify-content:center;padding:40px}
+#ov label{font-size:22px;color:#0f0;margin-bottom:16px}
+#ov input{width:100%;min-height:88px;background:#000;border:2px solid #0f0;color:#fff;font-size:26px;padding:8px 16px;font-family:inherit}
+.msg{padding:6px 24px;border-left:6px solid transparent}
+.msg.sel{border-left-color:#0f0;background:#0a140a}
+.msg .m{font-size:22px;line-height:1.25}
+.msg .who{color:#8cf;font-weight:700}
+.msg.out .who{color:#888}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="head">Telegram <b id="srv">нет сервера</b></div>
+  <div id="list"></div>
+  <div id="foot">↑↓ выбор · Enter открыть · Esc назад</div>
+  <div id="ov"><label id="ovl"></label><input id="ovi" enterkeyhint="send"></div>
+</div>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+let server=localStorage.getItem('tgServer')||'';
+let screen='chats', sel=0, chats=[], msgs=[], curChat=null, lastTs=parseInt(localStorage.getItem('tgLastTs')||'0',10);
+let ovCb=null;
+const ttsOn=()=>localStorage.getItem('tgTts')!=='0';
+function say(t){ if(!ttsOn()||!('speechSynthesis' in window))return; const u=new SpeechSynthesisUtterance(t.slice(0,280)); speechSynthesis.cancel(); speechSynthesis.speak(u); }
+function foot(t){ $('foot').textContent=t; }
+function head(){ $('srv').textContent=server? (server.startsWith('http')?server.replace(/^https?:\/\//,'').slice(0,28):'??') :'нет сервера'; }
+async function api(p,opt){ if(!server) throw new Error('укажи сервер'); const r=await fetch(server.replace(/\/$/,'')+p,opt); if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }
+
+function ask(label,cb,val){ $('ovl').textContent=label; $('ovi').value=val||''; $('ov').style.display='flex'; setTimeout(()=>$('ovi').focus(),50); ovCb=cb; }
+$('ovi').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); $('ov').style.display='none'; const v=$('ovi').value.trim(); const cb=ovCb; ovCb=null; cb&&cb(v);} if(e.key==='Escape'){ e.preventDefault(); $('ov').style.display='none'; const cb=ovCb; ovCb=null; cb&&cb(''); } });
+
+function renderChats(){
+  $('list').innerHTML=chats.map((c,i)=>`<div class="row ${i===sel?'sel':''}" data-i="${i}">
+    <div class="t">${c.title}</div><div class="s">${c.unread?`<span class="unread">${c.unread>99?'99+':c.unread}</span>`:''}${c.last||''}</div></div>`).join('');
+}
+function renderMsgs(){
+  $('list').innerHTML=`<div class="msg" data-s="top"><div class="m" style="color:#0f0">↩ Ответить диктовкой (Enter)</div></div>`+
+  msgs.map((m,i)=>`<div class="msg ${i===sel-1?'sel':''} ${m.out?'out':''}" data-i="${i}"><div class="m"><span class="who">${m.out?'я':m.name}:</span> ${m.text}</div></div>`).join('');
+  const s=document.querySelector('.msg.sel'); if(s) s.scrollIntoView({block:'center'});
+}
+function paint(){ screen==='chats'?renderChats():renderMsgs(); }
+
+async function openChat(c){
+  screen='thread'; sel=0; curChat=c; head();
+  foot('гружу…');
+  const d=await api('/api/messages?chat='+c.id+'&limit=30');
+  msgs=d.messages;
+  try{ await api('/api/read',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({chat:c.id})}); }catch(e){}
+  paint(); foot('↑↓ листать · Enter озвучить · ↑верх=ответ · Esc назад');
+}
+
+async function poll(){
+  if(!server){ screen='chats'; $('list').innerHTML='<div class="row sel"><div class="t">⚙ Укажи адрес моста</div><div class="s">Enter — ввести URL моста (http://… или https://…)</div></div>'; return; }
+  try{
+    const st=await api('/api/state');
+    if(!st.authed){ foot('мост онлайн, но не залогинен (login на ПК)'); }
+    const ev=await api('/api/events?since='+lastTs);
+    for(const e of ev.events.slice(-3)) say(`Сообщение от ${e.name}: ${e.text}`);
+    if(ev.events.length){ lastTs=Math.max(...ev.events.map(e=>e.ts),lastTs); localStorage.setItem('tgLastTs',String(lastTs)); }
+    const d=await api('/api/chats');
+    chats=d.chats;
+    if(screen==='chats') paint();
+    foot('ок · '+new Date().toLocaleTimeString()+' · Esc=меню настроек');
+  }catch(e){ foot('ошибка: '+e.message); }
+}
+
+async function sendReply(text){
+  if(!text) return;
+  try{ await api('/api/send',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({chat:curChat.id,text})}); foot('отправлено'); say('отправлено'); openChat(curChat); }
+  catch(e){ foot('не отправлено: '+e.message); }
+}
+
+const count=()=>screen==='chats'?chats.length:(msgs.length+1);
+const max=()=>Math.max(0,count()-1);
+document.addEventListener('keydown',async e=>{
+  if($('ov').style.display==='flex') return;
+  const k=e.key;
+  if(k==='ArrowUp'||k==='ArrowDown'){ sel=Math.min(max(),Math.max(0,sel+(k==='ArrowUp'?-1:1)));
+    if(screen==='chats') await poll0(); else paint(); e.preventDefault(); }
+  else if(k==='Enter'){
+    e.preventDefault();
+    if(screen==='chats'){
+      if(!server) return ask('URL моста (напр. https://xxx.trycloudflare.com)',v=>{ if(/^https?:\/\//.test(v)){ server=v; localStorage.setItem('tgServer',v); head(); poll(); } });
+      if(chats[sel]) openChat(chats[sel]).catch(e=>foot('ошибка: '+e.message));
+    } else {
+      if(sel===0) return ask('Ответ '+curChat.title,v=>v&&sendReply(v));
+      const m=msgs[sel-1]; if(m) say((m.out?'':m.name+': ')+m.text);
+    }
+  }
+  else if(k==='Escape'){ e.preventDefault(); if(screen==='thread'){ screen='chats'; sel=0; paint(); } else ask('Команды: server=<URL>, tts=on/off',v=>{ if(v.startsWith('server=')){server=v.slice(7).trim();localStorage.setItem('tgServer',server);head();poll();} if(v==='tts=off'){localStorage.setItem('tgTts','0');foot('TTS выкл');} if(v==='tts=on'){localStorage.setItem('tgTts','1');say('голос вкл');} }); }
+  function noop(){}
+});
+async function poll0(){ renderChats(); }
+head(); paint(); poll(); setInterval(poll,15000);
+</script>
+</body>
+</html>

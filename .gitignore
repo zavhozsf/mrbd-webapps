@@ -1,0 +1,4 @@
+bridge/.venv/
+bridge/tg.session*
+bridge/config.json
+__pycache__/
